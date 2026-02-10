@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Bedrock Access Gateway - Node.js with Response Streaming
+
+Parameters:
+  ApiKey:
+    Type: String
+    Description: API key for authentication
+    NoEcho: true
+
+  DefaultModelId:
+    Type: String
+    Default: global.anthropic.claude-opus-4-6-v1
+    Description: Default Bedrock model ID
+
+  DefaultEmbeddingModel:
+    Type: String
+    Default: cohere.embed-multilingual-v3
+    Description: Default embedding model ID
+
+
+
+Globals:
+  Function:
+    Timeout: 900
+    MemorySize: 1024
+    Runtime: nodejs20.x
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        NODE_ENV: "production"
+        API_KEY: !Ref ApiKey
+        DEFAULT_MODEL: !Ref DefaultModelId
+        DEFAULT_EMBEDDING_MODEL: !Ref DefaultEmbeddingModel
+        ENABLE_CROSS_REGION_INFERENCE: "true"
+        ENABLE_APPLICATION_INFERENCE_PROFILES: "true"
+
+Resources:
+  BedrockAccessGatewayFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: LambdaLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-function
+      CodeUri: ./src
+      Handler: index.handler
+      Description: Bedrock Access Gateway API with Response Streaming
+      Environment:
+        Variables:
+          NODE_ENV: "production"
+          API_KEY: !Ref ApiKey
+          DEFAULT_MODEL: !Ref DefaultModelId
+          DEFAULT_EMBEDDING_MODEL: !Ref DefaultEmbeddingModel
+          ENABLE_CROSS_REGION_INFERENCE: "true"
+          ENABLE_APPLICATION_INFERENCE_PROFILES: "true"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:ListFoundationModels
+                - bedrock:ListInferenceProfiles
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - arn:aws:bedrock:*::foundation-model/*
+                - arn:aws:bedrock:*:*:inference-profile/*
+                - arn:aws:bedrock:*:*:application-inference-profile/*
+    Metadata:
+      BuildMethod: nodejs24.x
+
+  # API Gateway REST API
+  BedrockAccessGatewayApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${AWS::StackName}-api
+      Description: Bedrock Access Gateway with Response Streaming
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Root resource method (for /health)
+  RootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BedrockAccessGatewayApi
+      ResourceId: !GetAtt BedrockAccessGatewayApi.RootResourceId
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2021-11-15/functions/${BedrockAccessGatewayFunction.Arn}/response-streaming-invocations
+        TimeoutInMillis: 900000
+        ResponseTransferMode: STREAM
+
+  # Proxy resource for all paths
+  ProxyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref BedrockAccessGatewayApi
+      ParentId: !GetAtt BedrockAccessGatewayApi.RootResourceId
+      PathPart: "{proxy+}"
+
+  ProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BedrockAccessGatewayApi
+      ResourceId: !Ref ProxyResource
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2021-11-15/functions/${BedrockAccessGatewayFunction.Arn}/response-streaming-invocations
+        TimeoutInMillis: 900000
+        ResponseTransferMode: STREAM
+
+  # Lambda permission for API Gateway
+  ApiGatewayInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BedrockAccessGatewayFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BedrockAccessGatewayApi}/*/*
+
+  # Lambda permission for API Gateway streaming invocations
+  ApiGatewayInvokeStreamingPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BedrockAccessGatewayFunction
+      Action: lambda:InvokeWithResponseStream
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BedrockAccessGatewayApi}/*/*
+
+
+
+  # API Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - RootMethod
+      - ProxyMethod
+    Properties:
+      RestApiId: !Ref BedrockAccessGatewayApi
+      Description: Deployment with response streaming
+
+  # API Stage
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref BedrockAccessGatewayApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: v1
+      Description: Production stage with response streaming
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+
+  # CloudWatch Log Group for Lambda Function
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-function
+      RetentionInDays: 7
+
+  # CloudWatch Log Group for API Gateway
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/${AWS::StackName}-logs
+      RetentionInDays: 7
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${BedrockAccessGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/v1
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiUrl
+
+  HealthCheckUrl:
+    Description: Health check endpoint
+    Value: !Sub https://${BedrockAccessGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/v1/health
+
+  ModelsTestCommand:
+    Description: Test models endpoint
+    Value: !Sub |
+      curl -X POST https://${BedrockAccessGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/v1/models \
+        -H "Authorization: Bearer ${ApiKey}"
+
+  OpenAITestCommand:
+    Description: Test command with curl (OpenAI format)
+    Value: !Sub |
+      curl https://${BedrockAccessGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/v1/chat/completions \
+        -H "Authorization: Bearer ${ApiKey}" \
+        -H "Content-Type: application/json" \
+        -d '{"messages":[{"role":"user","content":"Hello"}]}'
+
+  AnthropicTestCommand:
+    Description: Test command with curl (Anthropic format)
+    Value: !Sub |
+      curl https://${BedrockAccessGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/v1/chat/messages \
+        -H "x-api-key: ${ApiKey}" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "Content-Type: application/json" \
+        -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":1024}'

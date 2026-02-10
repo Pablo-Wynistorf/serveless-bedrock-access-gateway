@@ -1,0 +1,11 @@
+# SAM configuration (keep example, ignore actual config with secrets)
+samconfig.toml
+.aws-sam
+src/.env
+*/node_modules/
+.DS_Store
+
+# Ensure no root-level Node.js files
+/node_modules/
+/package-lock.json
+/package.json

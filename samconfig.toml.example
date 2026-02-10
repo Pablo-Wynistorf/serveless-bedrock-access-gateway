@@ -1,0 +1,32 @@
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "aws-bedrock-access-gateway"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+region = "us-east-1"
+parameter_overrides = [
+    "ApiKey=YOUR_API_KEY_HERE",
+    "DefaultModelId=global.anthropic.claude-opus-4-6-v1",
+    "DefaultEmbeddingModel=cohere.embed-multilingual-v3"
+]
+
+[default.package.parameters]
+resolve_s3 = true
+
+[default.sync.parameters]
+watch = true
+
+[default.local_start_api.parameters]
+warm_containers = "EAGER"
+
+[default.local_start_lambda.parameters]
+warm_containers = "EAGER"
