@@ -26,30 +26,52 @@ if [ ! -f "samconfig.toml" ]; then
     fi
     echo "📋 Creating samconfig.toml from samconfig.toml.example..."
     cp samconfig.toml.example samconfig.toml
-fi
 
-# Check if API key is set in samconfig.toml
-if grep -q "YOUR_API_KEY_HERE" samconfig.toml; then
     echo ""
-    echo "🔑 API Key Setup Required"
-    echo "Please enter your API key for authentication:"
+    echo "🔑 Configuration Setup"
+    echo ""
+
+    # API Key (required)
     read -p "API Key: " api_key
-    
     if [ -z "$api_key" ]; then
         echo "❌ API key cannot be empty"
         exit 1
     fi
-    
-    # Replace the placeholder with the actual API key
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        sed -i '' "s/YOUR_API_KEY_HERE/$api_key/g" samconfig.toml
-    else
-        # Linux
-        sed -i "s/YOUR_API_KEY_HERE/$api_key/g" samconfig.toml
-    fi
-    
-    echo "✅ API key configured successfully"
+
+    # Default Model (pre-selected)
+    read -p "Default Model [global.anthropic.claude-opus-4-6-v1]: " default_model
+    default_model=${default_model:-global.anthropic.claude-opus-4-6-v1}
+
+    # Default Embedding Model (pre-selected)
+    read -p "Default Embedding Model [cohere.embed-multilingual-v3]: " default_embedding
+    default_embedding=${default_embedding:-cohere.embed-multilingual-v3}
+
+    # Apply configuration to samconfig.toml (using perl for safe literal replacement)
+    DEPLOY_API_KEY="$api_key" DEPLOY_MODEL="$default_model" DEPLOY_EMBED="$default_embedding" \
+    perl -i -pe '
+        BEGIN {
+            $key = $ENV{"DEPLOY_API_KEY"};
+            $model = $ENV{"DEPLOY_MODEL"};
+            $embed = $ENV{"DEPLOY_EMBED"};
+        }
+        if (/YOUR_API_KEY_HERE/) {
+            $i = index($_, "YOUR_API_KEY_HERE");
+            substr($_, $i, length("YOUR_API_KEY_HERE")) = $key;
+        }
+        if (/DefaultModelId=global\.anthropic\.claude-opus-4-6-v1/) {
+            $i = index($_, "DefaultModelId=global.anthropic.claude-opus-4-6-v1");
+            substr($_, $i, length("DefaultModelId=global.anthropic.claude-opus-4-6-v1")) = "DefaultModelId=" . $model;
+        }
+        if (/DefaultEmbeddingModel=cohere\.embed-multilingual-v3/) {
+            $i = index($_, "DefaultEmbeddingModel=cohere.embed-multilingual-v3");
+            substr($_, $i, length("DefaultEmbeddingModel=cohere.embed-multilingual-v3")) = "DefaultEmbeddingModel=" . $embed;
+        }
+    ' samconfig.toml
+
+    echo ""
+    echo "✅ Configuration complete"
+    echo "   Model: $default_model"
+    echo "   Embedding: $default_embedding"
     echo ""
 fi
 
