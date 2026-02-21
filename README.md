@@ -36,6 +36,8 @@ Base URL: `https://{api-id}.execute-api.{region}.amazonaws.com/v1`
 | POST | `/embeddings` | Text embeddings |
 | POST | `/chat/completions` | OpenAI format (streaming) |
 | POST | `/chat/messages` | Anthropic format (streaming) |
+| POST | `/messages` | Anthropic format — Claude Code (streaming) |
+| POST | `/messages/count_tokens` | Token counting stub (Claude Code) |
 
 ### OpenAI Format
 ```bash
@@ -138,6 +140,29 @@ const stream = await client.chat.completions.create({
 for await (const chunk of stream) {
   process.stdout.write(chunk.choices[0]?.delta?.content || '');
 }
+```
+
+### Claude Code CLI
+```bash
+export ANTHROPIC_BASE_URL=https://your-api-url/v1
+export ANTHROPIC_AUTH_TOKEN=YOUR_API_KEY
+export ANTHROPIC_API_KEY=""
+claude
+```
+
+`ANTHROPIC_API_KEY` must be set to an empty string — Claude Code requires it to be defined but the gateway uses `ANTHROPIC_AUTH_TOKEN` (sent as `x-api-key`).
+
+The gateway maps Anthropic model names (like `claude-sonnet-4-20250514`) to their Bedrock equivalents automatically. You can also use any Bedrock model by setting the alias env vars:
+
+```bash
+# Use Nova Pro as the "sonnet" model in Claude Code
+export ANTHROPIC_DEFAULT_SONNET_MODEL=amazon.nova-pro-v1:0
+
+# Use Nova Lite as the "haiku" model
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=amazon.nova-lite-v1:0
+
+# Or pass any Bedrock model ID directly
+claude --model us.amazon.nova-premier-v1:0
 ```
 
 ## Troubleshooting

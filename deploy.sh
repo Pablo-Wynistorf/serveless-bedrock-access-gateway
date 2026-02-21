@@ -46,13 +46,21 @@ if [ ! -f "samconfig.toml" ]; then
     read -p "Default Embedding Model [cohere.embed-multilingual-v3]: " default_embedding
     default_embedding=${default_embedding:-cohere.embed-multilingual-v3}
 
+    # Serper API Key (optional, for web search)
+    echo ""
+    echo "🔍 Web Search (optional)"
+    echo "   Get a free API key at https://serper.dev"
+    read -p "Serper API Key (press Enter to skip): " serper_key
+    serper_key=${serper_key:-}
+
     # Apply configuration to samconfig.toml (using perl for safe literal replacement)
-    DEPLOY_API_KEY="$api_key" DEPLOY_MODEL="$default_model" DEPLOY_EMBED="$default_embedding" \
+    DEPLOY_API_KEY="$api_key" DEPLOY_MODEL="$default_model" DEPLOY_EMBED="$default_embedding" DEPLOY_SERPER="$serper_key" \
     perl -i -pe '
         BEGIN {
             $key = $ENV{"DEPLOY_API_KEY"};
             $model = $ENV{"DEPLOY_MODEL"};
             $embed = $ENV{"DEPLOY_EMBED"};
+            $serper = $ENV{"DEPLOY_SERPER"};
         }
         if (/YOUR_API_KEY_HERE/) {
             $i = index($_, "YOUR_API_KEY_HERE");
@@ -66,12 +74,23 @@ if [ ! -f "samconfig.toml" ]; then
             $i = index($_, "DefaultEmbeddingModel=cohere.embed-multilingual-v3");
             substr($_, $i, length("DefaultEmbeddingModel=cohere.embed-multilingual-v3")) = "DefaultEmbeddingModel=" . $embed;
         }
+        if (/SerperApiKey=/) {
+            $i = index($_, "SerperApiKey=");
+            # Replace from SerperApiKey= to the closing quote
+            $end = index($_, "\"", $i);
+            substr($_, $i, $end - $i) = "SerperApiKey=" . $serper;
+        }
     ' samconfig.toml
 
     echo ""
     echo "✅ Configuration complete"
     echo "   Model: $default_model"
     echo "   Embedding: $default_embedding"
+    if [ -n "$serper_key" ]; then
+        echo "   Web Search: ✅ enabled (Serper.dev)"
+    else
+        echo "   Web Search: ⏭  skipped (set SerperApiKey later to enable)"
+    fi
     echo ""
 fi
 
@@ -90,53 +109,3 @@ sam deploy --no-confirm-changeset
 # Get outputs
 echo ""
 echo "✅ Deployment complete!"
-echo ""
-echo "📋 Stack Outputs:"
-aws cloudformation describe-stacks \
-  --stack-name aws-bedrock-access-gateway \
-  --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' \
-  --output table
-
-echo ""
-echo "🧪 Ready-to-use test commands:"
-echo ""
-
-# Get the test commands from CloudFormation outputs (they already have the API key included)
-MODELS_TEST=$(aws cloudformation describe-stacks \
-  --stack-name aws-bedrock-access-gateway \
-  --query 'Stacks[0].Outputs[?OutputKey==`ModelsTestCommand`].OutputValue' \
-  --output text)
-
-OPENAI_TEST=$(aws cloudformation describe-stacks \
-  --stack-name aws-bedrock-access-gateway \
-  --query 'Stacks[0].Outputs[?OutputKey==`OpenAITestCommand`].OutputValue' \
-  --output text)
-
-ANTHROPIC_TEST=$(aws cloudformation describe-stacks \
-  --stack-name aws-bedrock-access-gateway \
-  --query 'Stacks[0].Outputs[?OutputKey==`AnthropicTestCommand`].OutputValue' \
-  --output text)
-
-echo "📋 List available models:"
-echo "$MODELS_TEST"
-echo ""
-echo "💬 Test OpenAI chat completion:"
-echo "$OPENAI_TEST"
-echo ""
-echo "🤖 Test Anthropic messages:"
-echo "$ANTHROPIC_TEST"
-echo ""
-
-# Run one quick test to verify deployment
-echo "🔍 Running quick health check..."
-API_URL=$(aws cloudformation describe-stacks \
-  --stack-name aws-bedrock-access-gateway \
-  --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' \
-  --output text)
-
-HEALTH_RESPONSE=$(curl -s "$API_URL/health")
-if echo "$HEALTH_RESPONSE" | grep -q "OK"; then
-    echo "✅ API is healthy and ready to use!"
-else
-    echo "⚠️  Health check failed. Check the API Gateway and Lambda function."
-fi

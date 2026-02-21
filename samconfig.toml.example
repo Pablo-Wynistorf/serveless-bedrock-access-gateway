@@ -16,7 +16,8 @@ region = "us-east-1"
 parameter_overrides = [
     "ApiKey=YOUR_API_KEY_HERE",
     "DefaultModelId=global.anthropic.claude-opus-4-6-v1",
-    "DefaultEmbeddingModel=cohere.embed-multilingual-v3"
+    "DefaultEmbeddingModel=cohere.embed-multilingual-v3",
+    "SerperApiKey="
 ]
 
 [default.package.parameters]

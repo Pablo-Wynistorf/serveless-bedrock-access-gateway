@@ -7,6 +7,44 @@ import { handleEmbeddings } from './routes/embeddings.mjs';
 import { handleChatMessages } from './routes/chat-messages.mjs';
 import { handleChatCompletions } from './routes/chat-completions.mjs';
 
+// Stub for /v1/messages/count_tokens — returns an approximate token count
+// Claude Code calls this to check context window usage before sending messages
+function handleCountTokens(body, responseStream) {
+  // Rough approximation: ~4 chars per token for English text
+  let charCount = 0;
+  if (body.system) {
+    if (typeof body.system === 'string') charCount += body.system.length;
+    else if (Array.isArray(body.system)) {
+      for (const s of body.system) {
+        if (s.text) charCount += s.text.length;
+      }
+    }
+  }
+  if (Array.isArray(body.messages)) {
+    for (const msg of body.messages) {
+      if (typeof msg.content === 'string') {
+        charCount += msg.content.length;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.text) charCount += part.text.length;
+          else if (part.type === 'tool_use') charCount += JSON.stringify(part.input || {}).length + (part.name?.length || 0);
+          else if (part.type === 'tool_result') {
+            if (typeof part.content === 'string') charCount += part.content.length;
+            else if (Array.isArray(part.content)) {
+              for (const c of part.content) { if (c.text) charCount += c.text.length; }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (Array.isArray(body.tools)) {
+    charCount += JSON.stringify(body.tools).length;
+  }
+  const inputTokens = Math.ceil(charCount / 4);
+  return sendJsonResponse(responseStream, 200, { input_tokens: inputTokens });
+}
+
 // Validate config at cold start
 if (!API_KEY) {
   console.error('API_KEY environment variable is missing!');
@@ -28,7 +66,7 @@ export const handler = awslambda.streamifyResponse(
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, anthropic-version'
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, api-key, anthropic-version, anthropic-beta'
         }
       });
       responseStream.end();
@@ -43,6 +81,12 @@ export const handler = awslambda.streamifyResponse(
 
       // Auth gate
       if (!authenticate(headers)) {
+        // Use Anthropic error format for Anthropic endpoints
+        if (path === '/chat/messages' || path === '/messages' || path === '/messages/count_tokens' || path === '/chat/messages/count_tokens') {
+          return sendJsonResponse(responseStream, 401, {
+            type: 'error', error: { type: 'authentication_error', message: 'Missing or invalid x-api-key header' }
+          });
+        }
         return sendJsonResponse(responseStream, 401, {
           error: { message: 'Missing or invalid authorization header', type: 'authentication_error' }
         });
@@ -63,10 +107,17 @@ export const handler = awslambda.streamifyResponse(
         return sendJsonResponse(responseStream, result.statusCode, result.body);
       }
 
-      if (path === '/chat/messages' && httpMethod === 'POST') {
+      // Anthropic: /v1/messages/count_tokens (stub for Claude Code compatibility)
+      if ((path === '/messages/count_tokens' || path === '/chat/messages/count_tokens') && httpMethod === 'POST') {
+        return handleCountTokens(parseBody(body), responseStream);
+      }
+
+      // Anthropic: /v1/messages or /chat/messages
+      if ((path === '/messages' || path === '/chat/messages') && httpMethod === 'POST') {
         return await handleChatMessages(parseBody(body), responseStream);
       }
 
+      // OpenAI: /v1/chat/completions
       if (path === '/chat/completions' && httpMethod === 'POST') {
         return await handleChatCompletions(parseBody(body), responseStream);
       }

@@ -4,12 +4,15 @@
   "description": "OpenAI and Anthropic compatible API for Amazon Bedrock (Node.js) with Response Streaming",
   "type": "module",
   "main": "index.mjs",
-  "dependencies": {},
   "devDependencies": {
     "@aws-sdk/client-bedrock": "^3.955.0",
     "@aws-sdk/client-bedrock-runtime": "^3.955.0"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^143.0.4",
+    "puppeteer-core": "^24.37.5"
   }
 }

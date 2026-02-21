@@ -18,15 +18,21 @@ Parameters:
     Default: cohere.embed-multilingual-v3
     Description: Default embedding model ID
 
+  SerperApiKey:
+    Type: String
+    Default: ''
+    Description: Serper.dev API key for web search (optional)
+    NoEcho: true
+
 
 
 Globals:
   Function:
     Timeout: 900
-    MemorySize: 1024
+    MemorySize: 2048
     Runtime: nodejs20.x
     Architectures:
-      - arm64
+      - x86_64
     Environment:
       Variables:
         NODE_ENV: "production"
@@ -35,6 +41,7 @@ Globals:
         DEFAULT_EMBEDDING_MODEL: !Ref DefaultEmbeddingModel
         ENABLE_CROSS_REGION_INFERENCE: "true"
         ENABLE_APPLICATION_INFERENCE_PROFILES: "true"
+        SERPER_API_KEY: !Ref SerperApiKey
 
 Resources:
   BedrockAccessGatewayFunction:
@@ -53,6 +60,7 @@ Resources:
           DEFAULT_EMBEDDING_MODEL: !Ref DefaultEmbeddingModel
           ENABLE_CROSS_REGION_INFERENCE: "true"
           ENABLE_APPLICATION_INFERENCE_PROFILES: "true"
+          SERPER_API_KEY: !Ref SerperApiKey
       Policies:
         - Statement:
             - Effect: Allow
@@ -96,6 +104,31 @@ Resources:
         TimeoutInMillis: 900000
         ResponseTransferMode: STREAM
 
+  # CORS OPTIONS for root
+  RootOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BedrockAccessGatewayApi
+      ResourceId: !GetAtt BedrockAccessGatewayApi.RootResourceId
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: "200"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key,anthropic-version'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: "200"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
   # Proxy resource for all paths
   ProxyResource:
     Type: AWS::ApiGateway::Resource
@@ -118,6 +151,31 @@ Resources:
         TimeoutInMillis: 900000
         ResponseTransferMode: STREAM
 
+  # CORS OPTIONS for proxy paths
+  ProxyOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref BedrockAccessGatewayApi
+      ResourceId: !Ref ProxyResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: "200"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key,anthropic-version'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: "200"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
   # Lambda permission for API Gateway
   ApiGatewayInvokePermission:
     Type: AWS::Lambda::Permission
@@ -138,22 +196,24 @@ Resources:
 
 
 
-  # API Deployment
-  ApiDeployment:
+  # API Deployment — rename logical ID to force redeployment on changes
+  ApiDeploymentV2:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
       - RootMethod
+      - RootOptionsMethod
       - ProxyMethod
+      - ProxyOptionsMethod
     Properties:
       RestApiId: !Ref BedrockAccessGatewayApi
-      Description: Deployment with response streaming
+      Description: Deployment with response streaming and CORS
 
   # API Stage
   ApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref BedrockAccessGatewayApi
-      DeploymentId: !Ref ApiDeployment
+      DeploymentId: !Ref ApiDeploymentV2
       StageName: v1
       Description: Production stage with response streaming
       TracingEnabled: true
